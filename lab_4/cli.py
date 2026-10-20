@@ -20,9 +20,10 @@ from config_loader import (
     SUPPORTED_ALGORITHMS,
 )
 from hash_core import (
+    AvalancheResult,
     compute_hash,
     get_avalanche_quality,
-    run_single_experiment,
+    run_experiments,
     summarize_results,
 )
 
@@ -84,28 +85,25 @@ def print_banner():
 
 def print_hash_pair(
     label: str,
-    original: str,
-    modified: str,
-    h_orig: str,
-    h_mod: str,
-    diff_pct: float,
-    changed_bits: int,
-    total_bits: int,
+    result: AvalancheResult,
     algorithm: str,
 ):
     labels = cli_config("labels")
     print(f"  {bold(label)}")
-    print(f"    {labels['source_text']} : {dim(repr(original))}")
-    print(f"    {labels['modified_text']}     : {yellow(repr(modified))}")
-    print(f"    {algorithm.upper()} до     : {dim(h_orig[:HASH_PREVIEW_LENGTH])}…")
-    print(f"    {algorithm.upper()} после  : {yellow(h_mod[:HASH_PREVIEW_LENGTH])}…")
+    print(f"    {labels['source_text']} : {dim(repr(result.original_text))}")
+    print(f"    {labels['modified_text']}     : {yellow(repr(result.modified_text))}")
+    original_preview = dim(result.original_hash[:HASH_PREVIEW_LENGTH])
+    modified_preview = yellow(result.modified_hash[:HASH_PREVIEW_LENGTH])
+    print(f"    {algorithm.upper()} до     : {original_preview}…")
+    print(f"    {algorithm.upper()} после  : {modified_preview}…")
 
-    filled = int(PROGRESS_BAR_LENGTH * diff_pct / 100)
+    filled = int(PROGRESS_BAR_LENGTH * result.diff_percent / 100)
     bar = green("█" * filled) + dim("░" * (PROGRESS_BAR_LENGTH - filled))
-    color = color_for_percent(diff_pct)
+    color = color_for_percent(result.diff_percent)
     print(
         f"    {labels['bit_difference']}   : [{bar}] "
-        f"{color(f'{diff_pct:.1f}%')} ({changed_bits} / {total_bits})"
+        f"{color(f'{result.diff_percent:.1f}%')} "
+        f"({result.changed_bits} / {result.total_bits})"
     )
     print()
 
@@ -196,39 +194,18 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main():
-    global _use_color
-
-    parser = build_parser()
-    args = parser.parse_args()
+def execute_experiments(args: argparse.Namespace) -> list[AvalancheResult]:
     messages = cli_config("messages")
-
-    match args.no_color:
-        case True:
-            _use_color = False
-
-    if args.count < MIN_EXPERIMENT_COUNT:
-        parser.error(messages["count_error"].format(min_count=MIN_EXPERIMENT_COUNT))
-
-    print_banner()
-
-    labels = cli_config("labels")
-    h_orig = compute_hash(args.text, args.algo)
-    print(f"  {labels['source_text']} : {yellow(repr(args.text))}")
-    print(f"  {args.algo.upper()} {labels['hash']}      : {dim(h_orig)}")
-    print()
-
-    match args.mod:
-        case mod if mod == ALL_MODIFICATIONS:
-            modifications = MODIFICATION_TYPES
-        case mod:
-            modifications = (mod,)
+    modifications = (
+        MODIFICATION_TYPES
+        if args.mod == ALL_MODIFICATIONS
+        else (args.mod,)
+    )
     total = args.count * len(modifications)
 
     print(bold(f"  {messages['starting'].format(total=total)}\n"))
 
-    results = []
-
+    pbar = None
     if tqdm is not None:
         pbar = tqdm(
             total=total,
@@ -238,38 +215,59 @@ def main():
             bar_format=cli_config("progress", "bar_format"),
         )
 
-    def callback(current, _total):
-        if tqdm is not None:
+    completed = 0
+
+    def show_result(result: AvalancheResult) -> None:
+        nonlocal completed
+        completed += 1
+        if args.verbose:
+            label = messages["experiment_label"].format(
+                number=completed,
+                modification_type=result.modification_type,
+            )
+            print_hash_pair(label, result, args.algo)
+        if pbar is not None:
             pbar.update(1)
 
+    def show_error(error: ValueError) -> None:
+        message = messages["warning"].format(error=error)
+        sys.stderr.write(f"\n  {message}\n")
+
     try:
-        for mod in modifications:
-            for _ in range(args.count):
-                try:
-                    r = run_single_experiment(args.text, mod, args.algo)
-                    results.append(r)
-                    if args.verbose:
-                        print_hash_pair(
-                            messages["experiment_label"].format(
-                                number=len(results),
-                                modification_type=r.modification_type,
-                            ),
-                            r.original_text,
-                            r.modified_text,
-                            r.original_hash,
-                            r.modified_hash,
-                            r.diff_percent,
-                            r.changed_bits,
-                            r.total_bits,
-                            args.algo,
-                        )
-                    callback(len(results), total)
-                except ValueError as e:
-                    sys.stderr.write("\n  " + messages["warning"].format(error=e) + "\n")
+        return run_experiments(
+            args.text,
+            count=args.count,
+            algorithm=args.algo,
+            modifications=modifications,
+            result_callback=show_result,
+            error_callback=show_error,
+        )
     finally:
-        if tqdm is not None:
+        if pbar is not None:
             pbar.close()
 
+
+def main():
+    global _use_color
+
+    parser = build_parser()
+    args = parser.parse_args()
+    messages = cli_config("messages")
+    _use_color = not args.no_color
+
+    if args.count < MIN_EXPERIMENT_COUNT:
+        parser.error(
+            messages["count_error"].format(min_count=MIN_EXPERIMENT_COUNT)
+        )
+
+    print_banner()
+    labels = cli_config("labels")
+    original_hash = compute_hash(args.text, args.algo)
+    print(f"  {labels['source_text']} : {yellow(repr(args.text))}")
+    print(f"  {args.algo.upper()} {labels['hash']}      : {dim(original_hash)}")
+    print()
+
+    results = execute_experiments(args)
     print()
 
     if not results:
@@ -278,18 +276,8 @@ def main():
 
     if not args.verbose:
         print(bold("  " + messages["sample_result"]))
-        r = results[-1]
-        print_hash_pair(
-            r.modification_type,
-            r.original_text,
-            r.modified_text,
-            r.original_hash,
-            r.modified_hash,
-            r.diff_percent,
-            r.changed_bits,
-            r.total_bits,
-            args.algo,
-        )
+        result = results[-1]
+        print_hash_pair(result.modification_type, result, args.algo)
 
     summary = summarize_results(results)
     print_summary_table(summary, args.algo)

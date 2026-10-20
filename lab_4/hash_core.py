@@ -147,6 +147,8 @@ def run_experiments(
     algorithm: str = settings.DEFAULT_ALGORITHM,
     modifications: Iterable[str] = settings.MODIFICATION_TYPES,
     progress_callback: Callable[[int, int], None] | None = None,
+    result_callback: Callable[[AvalancheResult], None] | None = None,
+    error_callback: Callable[[ValueError], None] | None = None,
 ) -> list[AvalancheResult]:
     """Запустить серию экспериментов."""
     if count < settings.MIN_EXPERIMENT_COUNT:
@@ -158,7 +160,16 @@ def run_experiments(
 
     for mod in modification_list:
         for _ in range(count):
-            results.append(run_single_experiment(text, mod, algorithm))
+            try:
+                result = run_single_experiment(text, mod, algorithm)
+            except ValueError as error:
+                if error_callback is None:
+                    raise
+                error_callback(error)
+                continue
+            results.append(result)
+            if result_callback is not None:
+                result_callback(result)
             if progress_callback is not None:
                 progress_callback(len(results), total)
 
