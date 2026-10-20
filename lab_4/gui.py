@@ -1,6 +1,5 @@
 import sys
-import time
-from typing import Optional
+from pathlib import Path
 
 try:
     from PyQt6.QtWidgets import (
@@ -9,8 +8,8 @@ try:
         QTableWidgetItem, QHeaderView, QProgressBar, QTextEdit, QGroupBox,
         QSplitter, QStatusBar, QMessageBox, QFrame, QTabWidget,
     )
-    from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
-    from PyQt6.QtGui import QFont, QColor, QPalette, QLinearGradient, QBrush
+    from PyQt6.QtCore import Qt, QThread, pyqtSignal
+    from PyQt6.QtGui import QColor
 except ImportError:
     print("Ошибка: PyQt6 не установлен. Выполните: pip install PyQt6")
     sys.exit(1)
@@ -27,7 +26,6 @@ from config_loader import (
     IDEAL_AVALANCHE_PERCENT,
     MAX_EXPERIMENT_COUNT,
     MIN_EXPERIMENT_COUNT,
-    MODERATE_AVALANCHE_PERCENT,
     MODIFICATION_TYPES,
     SUPPORTED_ALGORITHMS,
     WARNING_AVALANCHE_PERCENT,
@@ -43,10 +41,9 @@ from hash_core import (
 )
 
 
-
 class ExperimentWorker(QThread):
-    progress = pyqtSignal(int, int)         
-    result_ready = pyqtSignal(list)       
+    progress = pyqtSignal(int, int)
+    result_ready = pyqtSignal(list)
     error_occurred = pyqtSignal(str)
 
     def __init__(self, text: str, count: int, algorithm: str):
@@ -67,298 +64,151 @@ class ExperimentWorker(QThread):
         except Exception as e:
             self.error_occurred.emit(str(e))
 
-
-
-DARK_STYLE = """
-QMainWindow, QWidget {
-    background-color: #1a1a2e;
-    color: #e0e0e0;
-    font-family: 'Consolas', 'Courier New', monospace;
-}
-
-QGroupBox {
-    border: 1px solid #16213e;
-    border-radius: 6px;
-    margin-top: 8px;
-    padding: 8px;
-    font-size: 11px;
-    font-weight: bold;
-    color: #4fc3f7;
-}
-QGroupBox::title {
-    subcontrol-origin: margin;
-    left: 10px;
-    padding: 0 4px;
-}
-
-QLineEdit, QComboBox, QSpinBox {
-    background-color: #16213e;
-    border: 1px solid #0f3460;
-    border-radius: 4px;
-    padding: 5px 8px;
-    color: #e0e0e0;
-    font-size: 12px;
-}
-QLineEdit:focus, QComboBox:focus, QSpinBox:focus {
-    border: 1px solid #4fc3f7;
-}
-
-QPushButton {
-    background-color: #0f3460;
-    color: #e0e0e0;
-    border: 1px solid #4fc3f7;
-    border-radius: 5px;
-    padding: 7px 20px;
-    font-size: 12px;
-    font-weight: bold;
-}
-QPushButton:hover {
-    background-color: #1a5276;
-}
-QPushButton:pressed {
-    background-color: #4fc3f7;
-    color: #1a1a2e;
-}
-QPushButton:disabled {
-    background-color: #2c2c3e;
-    color: #666;
-    border-color: #444;
-}
-
-QProgressBar {
-    border: 1px solid #0f3460;
-    border-radius: 4px;
-    background-color: #16213e;
-    text-align: center;
-    color: #e0e0e0;
-    height: 18px;
-}
-QProgressBar::chunk {
-    background-color: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-        stop:0 #0f3460, stop:1 #4fc3f7);
-    border-radius: 3px;
-}
-
-QTableWidget {
-    background-color: #16213e;
-    border: 1px solid #0f3460;
-    border-radius: 4px;
-    gridline-color: #0f3460;
-    color: #e0e0e0;
-    font-size: 11px;
-}
-QTableWidget::item:selected {
-    background-color: #1a5276;
-}
-QHeaderView::section {
-    background-color: #0f3460;
-    color: #4fc3f7;
-    padding: 4px;
-    border: 1px solid #16213e;
-    font-size: 11px;
-    font-weight: bold;
-}
-
-QTextEdit {
-    background-color: #0d0d1a;
-    border: 1px solid #0f3460;
-    border-radius: 4px;
-    padding: 6px;
-    color: #4fc3f7;
-    font-family: 'Consolas', monospace;
-    font-size: 11px;
-}
-
-QTabWidget::pane {
-    border: 1px solid #0f3460;
-    border-radius: 4px;
-}
-QTabBar::tab {
-    background-color: #16213e;
-    color: #aaa;
-    padding: 6px 16px;
-    border-radius: 4px 4px 0 0;
-}
-QTabBar::tab:selected {
-    background-color: #0f3460;
-    color: #4fc3f7;
-}
-
-QStatusBar {
-    background-color: #0f3460;
-    color: #aaa;
-    font-size: 10px;
-}
-
-QSplitter::handle {
-    background-color: #0f3460;
-    width: 3px;
-}
-
-QLabel#title {
-    font-size: 18px;
-    font-weight: bold;
-    color: #4fc3f7;
-}
-QLabel#subtitle {
-    font-size: 11px;
-    color: #888;
-}
-QLabel#hashValue {
-    font-family: 'Consolas', monospace;
-    font-size: 10px;
-    color: #a8d8a8;
-    padding: 3px;
-    background-color: #0d0d1a;
-    border-radius: 3px;
-}
-"""
-
-
-
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle(GUI_WINDOW_TITLE)
         self.setMinimumSize(GUI_MIN_WIDTH, GUI_MIN_HEIGHT)
-        self.worker: Optional[ExperimentWorker] = None
+        self.worker: ExperimentWorker | None = None
         self._results: list[AvalancheResult] = []
         self._setup_ui()
-        self.setStyleSheet(DARK_STYLE)
+        style_path = Path(__file__).with_name("style.qss")
+        self.setStyleSheet(style_path.read_text(encoding="utf-8"))
 
-    # ── UI ─────────────────────────────────────────────────────────────────
-
-    def _setup_ui(self):
+    def _setup_ui(self) -> None:
         central = QWidget()
         self.setCentralWidget(central)
         root = QVBoxLayout(central)
         root.setSpacing(10)
         root.setContentsMargins(12, 10, 12, 10)
+        root.addLayout(self._create_header())
 
-        # Заголовок
-        header = QVBoxLayout()
-        title = QLabel("Лавинный эффект хеш-функций")
-        title.setObjectName("title")
-        subtitle = QLabel(f"Лабораторная работа №4 · {' / '.join(a.upper() for a in SUPPORTED_ALGORITHMS)}")
-        subtitle.setObjectName("subtitle")
-        header.addWidget(title)
-        header.addWidget(subtitle)
-        root.addLayout(header)
-
-        # Разделитель
         line = QFrame()
         line.setFrameShape(QFrame.Shape.HLine)
         line.setStyleSheet("color: #0f3460;")
         root.addWidget(line)
 
-        # Основная часть
         splitter = QSplitter(Qt.Orientation.Horizontal)
+        splitter.addWidget(self._create_parameters_panel())
+        splitter.addWidget(self._create_results_panel())
+        splitter.setSizes(GUI_SPLITTER_SIZES)
+        root.addWidget(splitter)
 
-        # ── Левая панель: параметры + хеш ──────────────────────────────────
-        left = QWidget()
-        left_layout = QVBoxLayout(left)
-        left_layout.setSpacing(8)
+        self.status = QStatusBar()
+        self.setStatusBar(self.status)
+        self.status.showMessage("Готово к работе")
+        self._update_hash_preview()
 
-        # Параметры
-        params_group = QGroupBox("⚙  Параметры эксперимента")
-        params_layout = QVBoxLayout(params_group)
-        params_layout.setSpacing(6)
+    def _create_header(self) -> QVBoxLayout:
+        header = QVBoxLayout()
+        title = QLabel("Лавинный эффект хеш-функций")
+        title.setObjectName("title")
+        algorithms = " / ".join(a.upper() for a in SUPPORTED_ALGORITHMS)
+        subtitle = QLabel(f"Лабораторная работа №4 · {algorithms}")
+        subtitle.setObjectName("subtitle")
+        header.addWidget(title)
+        header.addWidget(subtitle)
+        return header
 
-        params_layout.addWidget(QLabel("Исходная строка:"))
+    def _create_parameters_group(self) -> QGroupBox:
+        group = QGroupBox("⚙  Параметры эксперимента")
+        layout = QVBoxLayout(group)
+        layout.setSpacing(6)
+
+        layout.addWidget(QLabel("Исходная строка:"))
         self.text_input = QLineEdit(GUI_DEFAULT_TEXT)
         self.text_input.setPlaceholderText("Введите текст для хеширования…")
         self.text_input.textChanged.connect(self._update_hash_preview)
-        params_layout.addWidget(self.text_input)
+        layout.addWidget(self.text_input)
 
-        row1 = QHBoxLayout()
-        row1.addWidget(QLabel("Алгоритм:"))
+        algorithm_row = QHBoxLayout()
+        algorithm_row.addWidget(QLabel("Алгоритм:"))
         self.algo_combo = QComboBox()
         self.algo_combo.addItems(SUPPORTED_ALGORITHMS)
         self.algo_combo.currentTextChanged.connect(self._update_hash_preview)
-        row1.addWidget(self.algo_combo)
-        params_layout.addLayout(row1)
+        algorithm_row.addWidget(self.algo_combo)
+        layout.addLayout(algorithm_row)
 
-        row2 = QHBoxLayout()
-        row2.addWidget(QLabel("Экспериментов:"))
+        count_row = QHBoxLayout()
+        count_row.addWidget(QLabel("Экспериментов:"))
         self.count_spin = QSpinBox()
         self.count_spin.setRange(MIN_EXPERIMENT_COUNT, MAX_EXPERIMENT_COUNT)
         self.count_spin.setValue(MIN_EXPERIMENT_COUNT * 10)
-        row2.addWidget(self.count_spin)
-        params_layout.addLayout(row2)
+        count_row.addWidget(self.count_spin)
+        layout.addLayout(count_row)
+        return group
 
-        left_layout.addWidget(params_group)
-
-        # Хеш-превью
-        hash_group = QGroupBox("Хеш исходной строки")
-        hash_layout = QVBoxLayout(hash_group)
+    def _create_hash_group(self) -> QGroupBox:
+        group = QGroupBox("Хеш исходной строки")
+        layout = QVBoxLayout(group)
         self.hash_preview = QLabel("—")
         self.hash_preview.setObjectName("hashValue")
         self.hash_preview.setWordWrap(True)
-        hash_layout.addWidget(self.hash_preview)
-        left_layout.addWidget(hash_group)
+        layout.addWidget(self.hash_preview)
+        return group
 
-        # Кнопки
+    def _create_parameters_panel(self) -> QWidget:
+        panel = QWidget()
+        layout = QVBoxLayout(panel)
+        layout.setSpacing(8)
+        layout.addWidget(self._create_parameters_group())
+        layout.addWidget(self._create_hash_group())
+
         self.run_btn = QPushButton("Запустить эксперименты")
         self.run_btn.clicked.connect(self._run_experiments)
-        left_layout.addWidget(self.run_btn)
+        layout.addWidget(self.run_btn)
 
         self.progress_bar = QProgressBar()
         self.progress_bar.setValue(0)
         self.progress_bar.setVisible(False)
-        left_layout.addWidget(self.progress_bar)
+        layout.addWidget(self.progress_bar)
 
         self.cancel_btn = QPushButton("Остановить")
         self.cancel_btn.setVisible(False)
         self.cancel_btn.clicked.connect(self._cancel_experiments)
-        left_layout.addWidget(self.cancel_btn)
+        layout.addWidget(self.cancel_btn)
+        layout.addStretch()
+        return panel
 
-        left_layout.addStretch()
-
-        #Правая панель: результаты
-        right = QWidget()
-        right_layout = QVBoxLayout(right)
-        right_layout.setSpacing(8)
-
-        tabs = QTabWidget()
-
-        # Таблица результатов
-        table_widget = QWidget()
-        table_layout = QVBoxLayout(table_widget)
+    def _create_results_table(self) -> QWidget:
+        panel = QWidget()
+        layout = QVBoxLayout(panel)
         self.results_table = QTableWidget()
         self.results_table.setColumnCount(6)
         self.results_table.setHorizontalHeaderLabels([
             "№", "Тип", "Изменённый текст", "Хеш до", "Хеш после", "% разл."
         ])
-        self.results_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-        self.results_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self.results_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        table_layout.addWidget(self.results_table)
-        tabs.addTab(table_widget, "Таблица")
+        header = self.results_table.horizontalHeader()
+        header.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.results_table.setSelectionBehavior(
+            QTableWidget.SelectionBehavior.SelectRows
+        )
+        self.results_table.setEditTriggers(
+            QTableWidget.EditTrigger.NoEditTriggers
+        )
+        layout.addWidget(self.results_table)
+        return panel
 
-        # Статистика
-        stat_widget = QWidget()
-        stat_layout = QVBoxLayout(stat_widget)
+    def _create_statistics_panel(self) -> QWidget:
+        panel = QWidget()
+        layout = QVBoxLayout(panel)
         self.stat_text = QTextEdit()
         self.stat_text.setReadOnly(True)
-        self.stat_text.setPlaceholderText("Здесь появится статистика после запуска…")
-        stat_layout.addWidget(self.stat_text)
-        tabs.addTab(stat_widget, "Статистика")
+        self.stat_text.setPlaceholderText(
+            "Здесь появится статистика после запуска…"
+        )
+        layout.addWidget(self.stat_text)
+        return panel
 
-        right_layout.addWidget(tabs)
-
-        splitter.addWidget(left)
-        splitter.addWidget(right)
-        splitter.setSizes(GUI_SPLITTER_SIZES)
-
-        root.addWidget(splitter)
-
-        # Статус-бар
-        self.status = QStatusBar()
-        self.setStatusBar(self.status)
-        self.status.showMessage("Готово к работе")
-
-        self._update_hash_preview()
-
+    def _create_results_panel(self) -> QWidget:
+        panel = QWidget()
+        layout = QVBoxLayout(panel)
+        layout.setSpacing(8)
+        tabs = QTabWidget()
+        tabs.addTab(self._create_results_table(), "Таблица")
+        tabs.addTab(self._create_statistics_panel(), "Статистика")
+        layout.addWidget(tabs)
+        return panel
 
     def _update_hash_preview(self):
         text = self.text_input.text()
@@ -368,7 +218,6 @@ class MainWindow(QMainWindow):
             return
         try:
             h = compute_hash(text, algo)
-            # Переносим для читаемости
             self.hash_preview.setText(h[:HASH_PREVIEW_LENGTH] + "\n" + h[HASH_PREVIEW_LENGTH:])
         except Exception as e:
             self.hash_preview.setText(f"Ошибка: {e}")
@@ -496,7 +345,6 @@ class MainWindow(QMainWindow):
         lines.append("  бита входа должно изменять ~50% выходных бит.")
 
         self.stat_text.setPlainText("\n".join(lines))
-
 
 
 def main():
