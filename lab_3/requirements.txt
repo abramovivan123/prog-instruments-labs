@@ -1,0 +1,1 @@
+# Python 3.10 or newer. Only standard-library modules are used.
