@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import random
+from collections import defaultdict
 from dataclasses import dataclass
 from typing import Callable, Iterable
 
@@ -127,7 +128,7 @@ def run_single_experiment(
     original_hash = compute_hash(text, algorithm)
     modified_hash = compute_hash(modified_text, algorithm)
     changed_bits = count_differing_bits(original_hash, modified_hash)
-    total_bits = len(hash_to_bits(original_hash))
+    total_bits = len(original_hash) * settings.HEX_DIGIT_BITS
 
     return AvalancheResult(
         original_text=text,
@@ -186,13 +187,15 @@ def summarize_results(results: list[AvalancheResult]) -> dict:
     avg_bits = round(sum(r.changed_bits for r in results) / total_experiments, 2)
     total_bits = results[0].total_bits
 
-    by_modification: dict[str, float] = {}
-    for mod in dict.fromkeys(r.modification_type for r in results):
-        mod_results = [r for r in results if r.modification_type == mod]
-        by_modification[mod] = round(
-            sum(r.diff_percent for r in mod_results) / len(mod_results),
-            2,
+    grouped_percentages: dict[str, list[float]] = defaultdict(list)
+    for result in results:
+        grouped_percentages[result.modification_type].append(
+            result.diff_percent
         )
+    by_modification = {
+        modification: round(sum(percentages) / len(percentages), 2)
+        for modification, percentages in grouped_percentages.items()
+    }
 
     return {
         "total_experiments": total_experiments,
